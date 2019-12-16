@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Data;
 using System.Data.Entity;
+using System.Data.Entity.Migrations;
 using System.Linq;
 using System.Net;
 using System.Web;
@@ -14,10 +15,102 @@ namespace StudentManagerEAP.Controllers
     {
         private StudentManagerEAPContext db = new StudentManagerEAPContext();
 
-        // GET: Students
-        public ActionResult Index()
+        public ActionResult GetListStudentData()
         {
-            return View(db.Students.ToList());
+            return new JsonResult()
+            {
+                Data = db.Students.Where(s => s.Status != StudentStatus.DELETED).ToList(),
+                JsonRequestBehavior = JsonRequestBehavior.AllowGet
+            };
+        }
+        // GET: Students
+        public ActionResult Index(string sortOrder, string searchKeyword, string currentFilter, int? page, int? limit, DateTime? start, DateTime? end)
+        {
+            ViewBag.CurrentSort = sortOrder;
+            ViewBag.NameSortParm = string.IsNullOrEmpty(sortOrder) ? "name_desc" : "";
+            ViewBag.EmailSortParm = string.IsNullOrEmpty(sortOrder) ? "email_desc" : "";
+            ViewBag.DateSortParm = sortOrder == "CreatedAt" ? "date_desc" : "CreatedAt";
+
+            if (searchKeyword != null)
+            {
+                page = 1;
+            }
+            else
+            {
+                searchKeyword = currentFilter;
+            }
+
+            ViewBag.CurrentFilter = searchKeyword;
+
+            var students = from s in db.Students.Where(s => s.Status != StudentStatus.DELETED) select s;
+            if (!string.IsNullOrEmpty(searchKeyword))
+            {
+                students = students.Where(s => s.FullName.Contains(searchKeyword) || s.Email.Contains(searchKeyword));
+            }
+
+            //if (fromDate != null && toDate != null)
+            //{
+            //    students = students.Where(c => c.CreatedAt >= fromDate && c.CreatedAt < toDate);
+            //    ViewBag.currentFromDate = fromDate;
+            //    ViewBag.currentToDate = toDate;
+            //}
+
+            var startTime = DateTime.Now;
+            startTime = startTime.AddYears(-1);
+            try
+            {
+                startTime = DateTime.Parse(start.ToString());
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine(e);
+            }
+
+            var endTime = DateTime.Now;
+            try
+            {
+                endTime = DateTime.Parse(end.ToString());
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine(e);
+            }
+            students = students.Where(s => s.CreatedAt >= startTime && s.CreatedAt <= endTime);
+            ViewBag.Start = startTime;
+            ViewBag.End = endTime;
+
+            switch (sortOrder)
+            {
+                case "name_desc":
+                    students = students.OrderByDescending(s => s.FullName);
+                    break;
+                case "email_desc":
+                    students = students.OrderByDescending(s => s.Email);
+                    break;
+                case "CreatedAt":
+                    students = students.OrderBy(s => s.CreatedAt);
+                    break;
+                case "date_desc":
+                    students = students.OrderByDescending(s => s.CreatedAt);
+                    break;
+                default:
+                    students = students.OrderBy(s => s.FullName);
+                    break;
+            }
+
+            //int _limit = (limit ?? 10);
+            //int _page = (page ?? 1);
+
+            //ViewBag.CurrentPage = _page;
+            //ViewBag.Limit = _limit;
+            //ViewBag.TotalPage = Math.Ceiling((double)(students.Count() / _limit));
+
+
+            int pageSize = 3;
+            int pageNumber = (page ?? 1);
+
+            return View(students.ToPagedList(pageNumber, pageSize));
+            //return View(students.Skip((_page - 1) * _limit).Take(_limit).ToList());
         }
 
         // GET: Students/Details/5
@@ -28,7 +121,7 @@ namespace StudentManagerEAP.Controllers
                 return new HttpStatusCodeResult(HttpStatusCode.BadRequest);
             }
             Student student = db.Students.Find(id);
-            if (student == null)
+            if (student == null || student.IsDeleted())
             {
                 return HttpNotFound();
             }
@@ -50,11 +143,34 @@ namespace StudentManagerEAP.Controllers
         {
             if (ModelState.IsValid)
             {
-                db.Students.Add(student);
-                db.SaveChanges();
+                try
+                {
+                    student.CreatedAt = DateTime.Now;
+                    student.UpdatedAt = DateTime.Now;
+                    student.DeletedAt = DateTime.Now;
+                    db.Students.Add(student);
+
+                    db.SaveChanges();
+                }
+                catch (System.Data.Entity.Validation.DbEntityValidationException dbEx)
+                {
+                    Exception raise = dbEx;
+                    foreach (var validationErrors in dbEx.EntityValidationErrors)
+                    {
+                        foreach (var validationError in validationErrors.ValidationErrors)
+                        {
+                            string message = string.Format("{0}:{1}",
+                                validationErrors.Entry.Entity.ToString(),
+                                validationError.ErrorMessage);
+                            // raise a new exception nesting  
+                            // the current instance as InnerException  
+                            raise = new InvalidOperationException(message, raise);
+                        }
+                    }
+                    throw raise;
+                }
                 return RedirectToAction("Index");
             }
-
             return View(student);
         }
 
@@ -66,7 +182,7 @@ namespace StudentManagerEAP.Controllers
                 return new HttpStatusCodeResult(HttpStatusCode.BadRequest);
             }
             Student student = db.Students.Find(id);
-            if (student == null)
+            if (student == null || student.IsDeleted())
             {
                 return HttpNotFound();
             }
@@ -78,11 +194,26 @@ namespace StudentManagerEAP.Controllers
         // more details see https://go.microsoft.com/fwlink/?LinkId=317598.
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public ActionResult Edit([Bind(Include = "RollNumber,FullName,Email,CreatedAt,UpdatedAt,DeletedAt,Status")] Student student)
+        public ActionResult Edit([Bind(Include = "RollNumber,FullName,Email,Status")] Student student)
         {
+            if (student.RollNumber == null)
+            {
+                return new HttpStatusCodeResult(HttpStatusCode.BadRequest);
+            }
+
+            var existStudent = db.Students.Find(student.RollNumber);
+            if (existStudent == null)
+            {
+                return new HttpStatusCodeResult(HttpStatusCode.NotFound);
+            }
+
             if (ModelState.IsValid)
             {
-                db.Entry(student).State = EntityState.Modified;
+                existStudent.FullName = student.FullName;
+                existStudent.Email = student.Email;
+                existStudent.Status = student.Status;
+                existStudent.UpdatedAt = DateTime.Now;
+                db.Students.AddOrUpdate(existStudent);
                 db.SaveChanges();
                 return RedirectToAction("Index");
             }
@@ -97,7 +228,7 @@ namespace StudentManagerEAP.Controllers
                 return new HttpStatusCodeResult(HttpStatusCode.BadRequest);
             }
             Student student = db.Students.Find(id);
-            if (student == null)
+            if (student == null || student.IsDeleted())
             {
                 return HttpNotFound();
             }
@@ -109,9 +240,25 @@ namespace StudentManagerEAP.Controllers
         [ValidateAntiForgeryToken]
         public ActionResult DeleteConfirmed(string id)
         {
-            Student student = db.Students.Find(id);
-            db.Students.Remove(student);
-            db.SaveChanges();
+            if (id == null)
+            {
+                return new HttpStatusCodeResult(HttpStatusCode.BadRequest);
+            }
+
+            var existStudent = db.Students.Find(id);
+            if (existStudent == null || existStudent.IsDeleted())
+            {
+                return new HttpStatusCodeResult(HttpStatusCode.NotFound);
+            }
+
+            if (ModelState.IsValid)
+            {
+                existStudent.DeletedAt = DateTime.Now;
+                existStudent.Status = StudentStatus.DELETED;
+                db.Students.AddOrUpdate(existStudent);
+                db.SaveChanges();
+            }
+
             return RedirectToAction("Index");
         }
 

@@ -32,32 +32,135 @@
         <th></th>
     </tr>
 
-@foreach (var item in Model) {
-    <tr>
-        <td>
-            @Html.DisplayFor(modelItem => item.FullName)
-        </td>
-        <td>
-            @Html.DisplayFor(modelItem => item.Email)
-        </td>
-        <td>
-            @Html.DisplayFor(modelItem => item.CreatedAt)
-        </td>
-        <td>
-            @Html.DisplayFor(modelItem => item.UpdatedAt)
-        </td>
-        <td>
-            @Html.DisplayFor(modelItem => item.DeletedAt)
-        </td>
-        <td>
-            @Html.DisplayFor(modelItem => item.Status)
-        </td>
-        <td>
-            @Html.ActionLink("Edit", "Edit", new { id=item.RollNumber }) |
-            @Html.ActionLink("Details", "Details", new { id=item.RollNumber }) |
-            @Html.ActionLink("Delete", "Delete", new { id=item.RollNumber })
-        </td>
-    </tr>
-}
+    @foreach (var item in Model)
+    {
+        <tr>
+            <td>
+                @Html.DisplayFor(modelItem => item.FullName)
+            </td>
+            <td>
+                @Html.DisplayFor(modelItem => item.Email)
+            </td>
+            <td>
+                @Html.DisplayFor(modelItem => item.CreatedAt)
+            </td>
+            <td>
+                @Html.DisplayFor(modelItem => item.UpdatedAt)
+            </td>
+            <td>
+                @Html.DisplayFor(modelItem => item.DeletedAt)
+            </td>
+            <td>
+                @Html.DisplayFor(modelItem => item.Status)
+            </td>
+            <td>
+                @Html.ActionLink("Edit", "Edit", new { id = item.RollNumber }) |
+                @Html.ActionLink("Details", "Details", new { id = item.RollNumber }) |
+                @Html.ActionLink("Delete", "Delete", new { id = item.RollNumber })
+            </td>
+        </tr>
+    }
 
 </table>
+
+@section scripts
+{
+    <script type="text/javascript">
+        $(function () {
+
+            var start = moment().subtract(29, 'days');
+            var end = moment();
+
+            //function cb(start, end) {
+            //    //$('#reportrange span').html(start.format('MMMM D, YYYY') + ' - ' + end.format('MMMM D, YYYY'));
+            //}
+
+            $('#reportrange').daterangepicker({
+                startDate: start,
+                endDate: end,
+                ranges: {
+                    'Today': [moment(), moment()],
+                    'Yesterday': [moment().subtract(1, 'days'), moment().subtract(1, 'days')],
+                    'Last 7 Days': [moment().subtract(6, 'days'), moment()],
+                    'Last 30 Days': [moment().subtract(29, 'days'), moment()],
+                    'This Month': [moment().startOf('month'), moment().endOf('month')],
+                    'Last Month': [moment().subtract(1, 'month').startOf('month'), moment().subtract(1, 'month').endOf('month')]
+                }
+            });
+            $('#reportrange').on('apply.daterangepicker',
+                function (ev, picker) {
+                    window.location.href =
+                        `/Students/Index/?start=${picker.startDate.format('MM/DD/YYYY')}&end=${picker.endDate
+                            .format('MM/DD/YYYY')}`;
+                });
+        });
+    </script>
+
+    <script type="text/javascript" src="https://cdn.jsdelivr.net/jquery/latest/jquery.min.js"></script>
+    <script type="text/javascript" src="https://cdn.jsdelivr.net/momentjs/latest/moment.min.js"></script>
+    <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/daterangepicker/daterangepicker.min.js"></script>
+    <link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/daterangepicker/daterangepicker.css" />
+
+    <script>
+        $(document).ready(function () {
+            $('.btn-delete').click(function () {
+                var id = $(this).attr("id").replace("delete-", "");
+                if (confirm("Are you sure want to delete this student?")) {
+                    var token = $('input[name="__RequestVerificationToken"]').val();
+                    $.ajax({
+                        url: "/Students/Delete/" + id,
+                        type: "POST",
+                        data: {
+                            __RequestVerificationToken: token
+                        },
+                        success: function (data) {
+                            alert("Delete success!");
+                            window.location.reload();
+                        },
+                        error: function (error) {
+                            alert("Action fails! Please try again!");
+                        }
+                    });
+                }
+                return false;
+            });
+        })
+    </script>
+
+    <script>
+        $(document).ready(function () {
+            var $input = $('.typeahead');
+            $input.typeahead({
+                autoSelect: true,
+                items: 3,
+                source: function (query, process) {
+                    $.ajax({
+                        url: '/Students/GetListStudentData',
+                        type: 'Get',
+                        success: function (response) {
+                            $.each(response,
+                                function () {
+                                    this.name = this.RollNumber + " - " + this.FullName;
+                                });
+                            return process(response);
+                        }
+                    });
+                }
+            });
+            $input.change(function () {
+                var current = $input.typeahead("getActive");
+                if (current) {
+                    // Some item from your model is active!
+                    if (current.name == $input.val()) {
+                        $('#studentId').val(current.RollNumber);
+                    } else {
+                        // This means it is only a partial match, you can either add a new item
+                        // or take the active if you don't want new items
+                    }
+                } else {
+                    // Nothing is active so it is a new value (or maybe empty value)
+                }
+            });
+        })
+    </script>
+}
